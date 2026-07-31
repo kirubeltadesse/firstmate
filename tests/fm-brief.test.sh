@@ -71,6 +71,45 @@ test_ship_modes_generate_clean_briefs() {
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }
 
+# Every ship-mode scaffold must carry the graphify step as Setup step 2, and the
+# no-mistakes doctor step must be renumbered to 3 so the numbered list stays
+# coherent in all three delivery modes (direct-PR and local-only end at step 2).
+test_ship_setup_carries_graphify_step() {
+  local home id brief
+  home="$TMP_ROOT/graphify-home"
+  write_registry "$home"
+
+  for id_proj in "brief-graphify-n1:no-registry-proj" "brief-graphify-p1:direct-proj" "brief-graphify-l1:local-proj"; do
+    id=${id_proj%%:*}
+    proj=${id_proj##*:}
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" "$proj" >/dev/null 2>&1
+    brief="$home/data/$id/brief.md"
+    assert_present "$brief" "$id: brief was not scaffolded"
+    # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+    assert_grep '2. If the repo has graphify configured (check for `docs/graphify.md`)' "$brief" \
+      "$id: graphify step must be Setup step 2, conditional on docs/graphify.md"
+    # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+    assert_grep 'run `graphify extract . --code-only` once before exploring the codebase' "$brief" \
+      "$id: graphify step lost the extract-before-exploring instruction"
+    # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+    assert_grep 'Prefer graphify queries (`graphify god-nodes`, `graphify query`, `graphify path`, `graphify affected`) over grep for codebase exploration.' "$brief" \
+      "$id: graphify step lost the query-over-grep guidance"
+  done
+
+  # Only the no-mistakes mode adds a step 3; the renumber must not leave a gap
+  # or a duplicate 2.
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-graphify-doc-n2 some-proj >/dev/null 2>&1
+  brief="$home/data/brief-graphify-doc-n2/brief.md"
+  # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+  assert_grep '3. Run `no-mistakes doctor`' "$brief" \
+    "no-mistakes brief must renumber the doctor step to 3 after graphify"
+  # shellcheck disable=SC2016  # single quotes are deliberate: the backticks must stay literal
+  assert_no_grep '2. Run `no-mistakes doctor`' "$brief" \
+    "no-mistakes brief still numbers the doctor step 2, colliding with the graphify step"
+
+  pass "fm-brief.sh: ship Setup carries the graphify step with coherent numbering"
+}
+
 test_faster_paths_use_configured_authority_without_stacked_review() {
   local home id brief
   home="$TMP_ROOT/configured-authority-home"
@@ -342,6 +381,7 @@ test_scout_and_secondmate_scaffold() {
 test_script_parses
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
+test_ship_setup_carries_graphify_step
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
 test_ship_project_memory_wording
