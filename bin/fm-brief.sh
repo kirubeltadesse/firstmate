@@ -100,7 +100,10 @@ usage() {
 }
 
 case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
 esac
 
 # shellcheck source=bin/fm-marker-lib.sh
@@ -115,7 +118,10 @@ CREWMATE_PAUSE_WAIT_EXAMPLES='an upstream release, a rate-limit reset, a schedul
 resolve_directory_input() {
   local name=$1 path=$2 resolved
   case "$path" in
-    /*) printf '%s\n' "$path"; return 0 ;;
+  /*)
+    printf '%s\n' "$path"
+    return 0
+    ;;
   esac
   resolved=$(CDPATH='' cd -- "$path" 2>/dev/null && pwd -P) || {
     echo "error: $name directory cannot be resolved: $path" >&2
@@ -147,30 +153,48 @@ want_value=
 for a in "$@"; do
   if [ -n "$want_value" ]; then
     case "$a" in
-      --*) echo "error: --$want_value requires a value" >&2; exit 1 ;;
+    --*)
+      echo "error: --$want_value requires a value" >&2
+      exit 1
+      ;;
     esac
     case "$want_value" in
-      mode) MODE=$a; MODE_SET=1 ;;
-      *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
+    mode)
+      MODE=$a
+      MODE_SET=1
+      ;;
+    *)
+      echo "error: internal parser state for --$want_value" >&2
+      exit 1
+      ;;
     esac
     want_value=
     continue
   fi
   case "$a" in
-    --scout) KIND=scout ;;
-    --secondmate) KIND=secondmate ;;
-    --herdr-lab) HERDR_LAB=1 ;;
-    --no-projects) NO_PROJECTS=1 ;;
-    --mode) want_value=mode ;;
-    --mode=*) MODE=${a#--mode=}; MODE_SET=1 ;;
-    # yolo never reaches the worker: it is firstmate's merge authority, not a
-    # brief input. Refuse it loudly so it is never silently dropped here and then
-    # believed to have been recorded.
-    --yolo|--yolo=*) echo "error: --yolo is not a brief input; pass it to bin/fm-spawn.sh, which records the task's merge posture" >&2; exit 1 ;;
-    *) POS+=("$a") ;;
+  --scout) KIND=scout ;;
+  --secondmate) KIND=secondmate ;;
+  --herdr-lab) HERDR_LAB=1 ;;
+  --no-projects) NO_PROJECTS=1 ;;
+  --mode) want_value=mode ;;
+  --mode=*)
+    MODE=${a#--mode=}
+    MODE_SET=1
+    ;;
+  # yolo never reaches the worker: it is firstmate's merge authority, not a
+  # brief input. Refuse it loudly so it is never silently dropped here and then
+  # believed to have been recorded.
+  --yolo | --yolo=*)
+    echo "error: --yolo is not a brief input; pass it to bin/fm-spawn.sh, which records the task's merge posture" >&2
+    exit 1
+    ;;
+  *) POS+=("$a") ;;
   esac
 done
-[ -z "$want_value" ] || { echo "error: --$want_value requires a value" >&2; exit 1; }
+[ -z "$want_value" ] || {
+  echo "error: --$want_value requires a value" >&2
+  exit 1
+}
 
 # Ship delivery mode is an explicit per-task decision (AGENTS.md section 7). A
 # missing or invalid value stops the scaffold rather than silently defaulting.
@@ -180,11 +204,15 @@ if [ "$KIND" = ship ]; then
     exit 1
   }
   case "$MODE" in
-    no-mistakes|direct-PR|local-only) ;;
-    no-mistakes-prod-only)
-      echo "error: no-mistakes-prod-only is a registry policy, not a task mode; classify this task's surface and resolve it to no-mistakes or direct-PR at intake" >&2
-      exit 1 ;;
-    *) echo "error: --mode must be one of no-mistakes, direct-PR, local-only (got '$MODE')" >&2; exit 1 ;;
+  no-mistakes | direct-PR | local-only) ;;
+  no-mistakes-prod-only)
+    echo "error: no-mistakes-prod-only is a registry policy, not a task mode; classify this task's surface and resolve it to no-mistakes or direct-PR at intake" >&2
+    exit 1
+    ;;
+  *)
+    echo "error: --mode must be one of no-mistakes, direct-PR, local-only (got '$MODE')" >&2
+    exit 1
+    ;;
   esac
 elif [ "$MODE_SET" -eq 1 ]; then
   echo "error: --mode applies only to ship briefs; a scout delivers a report and a secondmate charter is not a delivery contract" >&2
@@ -228,7 +256,10 @@ append_brief_include() {
 }
 
 BRIEF="$DATA/$ID/brief.md"
-[ -e "$BRIEF" ] && { echo "error: $BRIEF already exists" >&2; exit 1; }
+[ -e "$BRIEF" ] && {
+  echo "error: $BRIEF already exists" >&2
+  exit 1
+}
 mkdir -p "$DATA/$ID"
 
 ASK_USER_BLOCK=
@@ -259,27 +290,33 @@ EOF
 INBOX_SECTION=${INBOX_SECTION%$'\n'}
 
 if [ "$KIND" = secondmate ]; then
-SECONDMATE_PROJECTS=""
-idx=1
-while [ "$idx" -lt "${#POS[@]}" ]; do
-  SECONDMATE_PROJECTS="${SECONDMATE_PROJECTS}${SECONDMATE_PROJECTS:+ }${POS[$idx]}"
-  idx=$((idx + 1))
-done
-if [ "$NO_PROJECTS" -eq 1 ]; then
-  [ -z "$SECONDMATE_PROJECTS" ] || { echo "error: --no-projects cannot be combined with a project list" >&2; exit 1; }
-else
-  [ -n "$SECONDMATE_PROJECTS" ] || { echo "error: --secondmate requires at least one project, or --no-projects for a project-less home" >&2; exit 1; }
-fi
-SECONDMATE_CHARTER=${FM_SECONDMATE_CHARTER:-"{TASK}"}
-SECONDMATE_SCOPE=${FM_SECONDMATE_SCOPE:-${FM_SECONDMATE_CHARTER:-"{TASK}"}}
-if [ "$NO_PROJECTS" -eq 1 ]; then
-  PROJECT_CLONES_BODY="None. This is a project-less domain: its subject is the firstmate repo this home lives in, so it needs no separate clones under \`projects/\`; its crews take pooled worktrees of that firstmate repo."
-  PROJECT_CLONES_NOTE="This domain has no separate project clones: its subject is the firstmate repo this home lives in, and its crews take pooled worktrees of that repo."
-else
-  PROJECT_CLONES_BODY=$(printf '%s\n' "$SECONDMATE_PROJECTS" | tr ' ' '\n' | sed 's/^/- /')
-  PROJECT_CLONES_NOTE="The projects above are local clones for work you supervise; they are not an exclusive ownership claim."
-fi
-cat > "$BRIEF" <<EOF
+  SECONDMATE_PROJECTS=""
+  idx=1
+  while [ "$idx" -lt "${#POS[@]}" ]; do
+    SECONDMATE_PROJECTS="${SECONDMATE_PROJECTS}${SECONDMATE_PROJECTS:+ }${POS[$idx]}"
+    idx=$((idx + 1))
+  done
+  if [ "$NO_PROJECTS" -eq 1 ]; then
+    [ -z "$SECONDMATE_PROJECTS" ] || {
+      echo "error: --no-projects cannot be combined with a project list" >&2
+      exit 1
+    }
+  else
+    [ -n "$SECONDMATE_PROJECTS" ] || {
+      echo "error: --secondmate requires at least one project, or --no-projects for a project-less home" >&2
+      exit 1
+    }
+  fi
+  SECONDMATE_CHARTER=${FM_SECONDMATE_CHARTER:-"{TASK}"}
+  SECONDMATE_SCOPE=${FM_SECONDMATE_SCOPE:-${FM_SECONDMATE_CHARTER:-"{TASK}"}}
+  if [ "$NO_PROJECTS" -eq 1 ]; then
+    PROJECT_CLONES_BODY="None. This is a project-less domain: its subject is the firstmate repo this home lives in, so it needs no separate clones under \`projects/\`; its crews take pooled worktrees of that firstmate repo."
+    PROJECT_CLONES_NOTE="This domain has no separate project clones: its subject is the firstmate repo this home lives in, and its crews take pooled worktrees of that repo."
+  else
+    PROJECT_CLONES_BODY=$(printf '%s\n' "$SECONDMATE_PROJECTS" | tr ' ' '\n' | sed 's/^/- /')
+    PROJECT_CLONES_NOTE="The projects above are local clones for work you supervise; they are not an exclusive ownership claim."
+  fi
+  cat >"$BRIEF" <<EOF
 You are a persistent second mate managed by the main firstmate. Work on your own; do not wait for a human.
 
 # Charter
@@ -348,46 +385,46 @@ When you have no assigned or in-flight work after that reconciliation, go idle a
 An empty queue is a healthy resting state, not a cue to invent work: never spawn a survey, audit, or any self-directed "find work" task on your own initiative.
 If this charter cannot be carried out, append \`blocked [at=<epoch>]: {why}\` or \`failed [at=<epoch>]: {why}\` to the main status file and stop.
 EOF
-if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
-  echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
-else
-  echo "scaffolded: $BRIEF (secondmate charter)"
-fi
-exit 0
+  if [ "$SECONDMATE_CHARTER" = "{TASK}" ]; then
+    echo "scaffolded: $BRIEF (secondmate charter; replace {TASK})"
+  else
+    echo "scaffolded: $BRIEF (secondmate charter)"
+  fi
+  exit 0
 fi
 
 REPO=${POS[1]}
 
 if [ "$HERDR_LAB" -eq 1 ]; then
-HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
-# shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
-HERDR_SECTION=$(printf '%s\n' \
-'# Herdr isolation - HARD SAFETY CONTRACT' \
-'This brief was explicitly scaffolded with `--herdr-lab` because the task will drive Herdr lifecycle behavior.' \
-'On Herdr 0.7.3 the API socket is not relocatable by `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, or `HOME`.' \
-'A named non-`default` session plus a trailing `--session <name>` on every call is the only viable local isolation.' \
-'' \
-'1. Set `HERDR_LAB_HELPER='"$HERDR_LAB_HELPER"'` and generate the session name with `HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name '"$ID"')`.' \
-'   Install `trap '\''"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"'\'' EXIT` before provisioning, then provision only with `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"`.' \
-'2. Run every task-specific non-lifecycle Herdr command through `"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" <arguments...>`.' \
-'   The helper appends the required trailing `--session "$HERDR_LAB_SESSION"`; `HERDR_SESSION` alone is never accepted as isolation.' \
-'3. Teardown only through `"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"`.' \
-'   It re-checks refuse-default immediately before stop and again immediately before delete, and fails closed on ambiguity.' \
-'4. If an experiment requires a deliberate mid-run session stop, use only `"$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION"`; it performs the same immediate refuse-default check.' \
-'5. Forbidden commands: direct `herdr server stop`, every other server-global operation such as `herdr server live-handoff` or reload/update operations, direct `herdr session stop`, direct `herdr session delete`, and any Herdr call scoped only by ambient or inline `HERDR_SESSION`.' \
-'6. The helper records the live default session before provisioning and verifies the identical fleet state after teardown.' \
-'   A missing, stopped, or changed default session is a hard tripwire failure, never a cleanup warning to ignore.' \
-'' \
-'Never bypass the helper, even for a read-only lifecycle probe or cleanup after failure.' \
-'The captain fleet uses the running `default` session.')
+  HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
+  # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
+  HERDR_SECTION=$(printf '%s\n' \
+    '# Herdr isolation - HARD SAFETY CONTRACT' \
+    'This brief was explicitly scaffolded with `--herdr-lab` because the task will drive Herdr lifecycle behavior.' \
+    'On Herdr 0.7.3 the API socket is not relocatable by `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, or `HOME`.' \
+    'A named non-`default` session plus a trailing `--session <name>` on every call is the only viable local isolation.' \
+    '' \
+    '1. Set `HERDR_LAB_HELPER='"$HERDR_LAB_HELPER"'` and generate the session name with `HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name '"$ID"')`.' \
+    '   Install `trap '\''"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"'\'' EXIT` before provisioning, then provision only with `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"`.' \
+    '2. Run every task-specific non-lifecycle Herdr command through `"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" <arguments...>`.' \
+    '   The helper appends the required trailing `--session "$HERDR_LAB_SESSION"`; `HERDR_SESSION` alone is never accepted as isolation.' \
+    '3. Teardown only through `"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"`.' \
+    '   It re-checks refuse-default immediately before stop and again immediately before delete, and fails closed on ambiguity.' \
+    '4. If an experiment requires a deliberate mid-run session stop, use only `"$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION"`; it performs the same immediate refuse-default check.' \
+    '5. Forbidden commands: direct `herdr server stop`, every other server-global operation such as `herdr server live-handoff` or reload/update operations, direct `herdr session stop`, direct `herdr session delete`, and any Herdr call scoped only by ambient or inline `HERDR_SESSION`.' \
+    '6. The helper records the live default session before provisioning and verifies the identical fleet state after teardown.' \
+    '   A missing, stopped, or changed default session is a hard tripwire failure, never a cleanup warning to ignore.' \
+    '' \
+    'Never bypass the helper, even for a read-only lifecycle probe or cleanup after failure.' \
+    'The captain fleet uses the running `default` session.')
 else
-IFS= read -r -d '' HERDR_SECTION <<'EOF' || true
+  IFS= read -r -d '' HERDR_SECTION <<'EOF' || true
 # Herdr lifecycle declaration - NOT ENABLED
 **HARD SAFETY GATE:** this scaffold cannot inspect the task text filled in above.
 If the task will start, stop, delete, restart, profile, or otherwise drive Herdr lifecycle behavior, stop and regenerate the brief with `--herdr-lab` before dispatch.
 Do not add Herdr lifecycle commands to this unguarded brief by hand.
 EOF
-HERDR_SECTION=${HERDR_SECTION%$'\n'}
+  HERDR_SECTION=${HERDR_SECTION%$'\n'}
 fi
 
 IFS= read -r -d '' TASK_SECTION <<'EOF' || true
@@ -402,7 +439,7 @@ TASK_SECTION=${TASK_SECTION%$'\n'}
 
 if [ "$KIND" = scout ]; then
 if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
-  LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
+LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
 else
   LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
 fi
@@ -490,7 +527,7 @@ case "$MODE" in
 GRAPHIFY_HINT=""
     if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
       GRAPHIFY_HINT="
-4. Check for a knowledge graph in the project root (\`graphify-out/\` directory or \`graph.json\`). When present, prefer querying the knowledge graph over reading raw files:
+3. Check for a knowledge graph in the project root (\`graphify-out/\` directory or \`graph.json\`). When present, prefer querying the knowledge graph over reading raw files:
    \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
    \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
     fi
@@ -499,7 +536,7 @@ esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID") || exit 1
 DOD=$(fm_dod_block "$MODE" "$ID") || exit 1
 
-cat > "$BRIEF" <<EOF
+cat >"$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
 $TASK_SECTION
@@ -513,8 +550,10 @@ You are in a disposable git worktree of $REPO, at a detached HEAD on a clean def
 The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse --git-common-dir\` can help inspect the repo, but they do not prove you are outside the primary checkout.
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
- 1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
- 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
+1. First action: create your branch: \`git checkout -b fm/$ID\`
+2. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
+3. If the repo has graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
+   Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$SETUP2
 
 # Rules
 $RULE1
@@ -546,15 +585,7 @@ $ASK_USER_BLOCK
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs; only firstmate
    manages the daemon.
-   Before you append \`blocked:\` about the pipeline, run \`no-mistakes daemon status\` and
-   \`no-mistakes axi status\`. If the daemon socket refuses connections or is missing, append
-   \`blocked [at=<epoch>]: {the daemon error}\` and stop even when the local run record still says running or
-   fixing, because that record can be stale after the daemon exits. A run record failed with a
-   daemon error is also a real block.
-   Only after ruling out socket refusal, if the run is still running or fixing, reattach and keep
-   going. A drive-call error, timeout, slow read, or generic unreachability is NOT a daemon error:
-   the daemon accepts \`respond\` immediately and runs the round in the background, so a killed or
-   timed-out call was only waiting for a read while the run kept working.
+8. Never commit, push, or include \`context/*.md\` files in any branch or PR. These are local-only agent references and must stay outside version control.
 
 $INBOX_SECTION
 
