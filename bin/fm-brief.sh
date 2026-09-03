@@ -487,6 +487,13 @@ case "$MODE" in
   *)  # no-mistakes
     SETUP2="
 2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
+GRAPHIFY_HINT=""
+    if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
+      GRAPHIFY_HINT="
+4. Check for a knowledge graph in the project root (\`graphify-out/\` directory or \`graph.json\`). When present, prefer querying the knowledge graph over reading raw files:
+   \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
+   \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
+    fi
     ;;
 esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID") || exit 1
@@ -506,7 +513,8 @@ You are in a disposable git worktree of $REPO, at a detached HEAD on a clean def
 The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse --git-common-dir\` can help inspect the repo, but they do not prove you are outside the primary checkout.
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
-1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
+ 1. First action: create your branch: \`git checkout -b fm/$ID\`$SETUP2
+ 3. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
 
 # Rules
 $RULE1
