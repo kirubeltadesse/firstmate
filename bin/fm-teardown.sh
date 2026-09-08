@@ -44,10 +44,26 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
+# For PR-based ship tasks (no-mistakes, direct-PR, or local-only with a
+# resolvable default branch) the script additionally best-effort prunes
+# already-merged branches from the fork remote once the task's PR is
+# verified landed - both merge-commit ancestry and the squash-merge-then-
+# delete-branch content case - so the captain does not have to bulk-clean
+# stale branches again. The prune step skips the task's own worktree
+# branch, every branch checked out in any worktree, the upstream default
+# branch (main) plus develop when present, and any branch listed in
+# meta's held_branches=<comma-list> field. It runs only when no captain-
+# decision hold is open (decisions_reviewed=1 with non-empty decision_keys)
+# and only when --force is absent; --force stays the escape hatch the
+# captain can use to suppress cleanup on a one-off teardown. Detection
+# is best-effort: a missing upstream or absent gh auth logs a one-line note
+# and the rest of teardown continues. To pin a branch against accidental
+# cleanup, record it as held_branches=<csv> in the task meta.
 # Usage: fm-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
-#   checks, and discards secondmate child work for kind=secondmate. Only use it
-#   when the captain has explicitly said to discard the work.
+#   checks, skips the fork-branch prune step, and discards secondmate child
+#   work for kind=secondmate. Only use it when the captain has explicitly
+#   said to discard the work.
 #
 # Transient / stale worktree git lock recovery (teardown-lock-race): a crew process
 # killed mid-git-operation can leave a .git/worktrees/<wt>/index.lock (or, for a
@@ -147,6 +163,340 @@ default_branch() {
     fi
   done
   return 1
+}
+
+# Fork-branch prune helpers - keep the fork remote tidy once a task's PR
+# has actually landed. Every helper below is best-effort and fail-soft:
+# the teardown must keep moving even when the prune step cannot run, so
+# each helper logs a one-line note on failure and returns non-zero without
+# affecting the caller. The helpers operate on $PROJ (the shared project
+# clone the worktree points at), not on $WT, so fetches here populate the
+# same refs/remotes/<remote>/<branch> the worktree already sees.
+# "fork" = the remote whose URL owner matches the captain's GitHub login
+# (e.g. kirubeltadesse/<repo>); "upstream" = the project's canonical
+# remote (any non-fork remote; origin/upstream are preferred by name).
+
+# _captain_github_login: echo the captain's GitHub login via gh-axi (then
+# gh), or fail-soft when gh is unavailable or its output is unsafe.
+_captain_github_login() {
+  local login=
+  if command -v gh-axi >/dev/null 2>&1; then
+    login=$(gh-axi api user --jq .login 2>/dev/null) || login=
+  fi
+  if [ -z "$login" ] && command -v gh >/dev/null 2>&1; then
+    login=$(gh api user --jq .login 2>/dev/null) || login=
+  fi
+  case "$login" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  printf '%s\n' "$login"
+}
+
+# _remote_owner_repo <git-url>: echo "<owner>/<repo>" for github.com URLs,
+# or fail-soft otherwise. Supports git@github.com:o/r(.git), ssh://git@
+# github.com/o/r, and https/http://github.com/o/r forms; the rare deep
+# paths (org/sub/repo) are not recognized so a tenant-specific URL never
+# silently passes through.
+_remote_owner_repo() {
+  local url=$1 stripped owner repo
+  case "$url" in
+    '') return 1 ;;
+    git@github.com:*)       stripped=${url#git@github.com:} ;;
+    ssh://git@github.com/*) stripped=${url#ssh://git@github.com/} ;;
+    https://github.com/*)   stripped=${url#https://github.com/} ;;
+    http://github.com/*)    stripped=${url#http://github.com/} ;;
+    *) return 1 ;;
+  esac
+  stripped=${stripped%.git}
+  case "$stripped" in
+    */*) : ;;
+    *) return 1 ;;
+  esac
+  owner=${stripped%%/*}
+  repo=${stripped#*/}
+  case "$owner|$repo" in
+    ''\|*|*\|''|*\|*/*) return 1 ;;
+  esac
+  printf '%s/%s\n' "$owner" "$repo"
+}
+
+# _find_fork_remote <proj> <login>: echo the first remote in <proj> whose
+# URL owner equals <login>, or fail-soft when no such remote exists.
+# Iteration order is the project's `git remote` list (operator-declared).
+_find_fork_remote() {
+  local proj=$1 login=$2 name url owner_repo owner
+  [ -n "$proj" ] && [ -d "$proj" ] || return 1
+  [ -n "$login" ] || return 1
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    url=$(git -C "$proj" config --get "remote.$name.url" 2>/dev/null) || continue
+    owner_repo=$(_remote_owner_repo "$url") || continue
+    owner=${owner_repo%%/*}
+    [ "$owner" = "$login" ] || continue
+    printf '%s\n' "$name"
+    return 0
+  done <<EOF
+$(git -C "$proj" remote 2>/dev/null)
+EOF
+  return 1
+}
+
+# _find_upstream_remote <proj> <skip>: echo any non-<skip> remote in
+# <proj>. Prefers "origin" then "upstream" by name; falls back to the
+# first remaining remote in `git remote` order. Fail-soft when no other
+# remote exists.
+_find_upstream_remote() {
+  local proj=$1 skip=$2 name fallback=
+  [ -n "$proj" ] && [ -d "$proj" ] || return 1
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ "$name" = "$skip" ] && continue
+    case "$name" in
+      origin|upstream)
+        printf '%s\n' "$name"
+        return 0
+        ;;
+    esac
+    [ -n "$fallback" ] || fallback=$name
+  done <<EOF
+$(git -C "$proj" remote 2>/dev/null)
+EOF
+  [ -n "$fallback" ] || return 1
+  printf '%s\n' "$fallback"
+}
+
+# _default_branch_for_remote <proj> <remote>: echo the default branch
+# name on <remote> in <proj>. Prefers refs/remotes/<remote>/HEAD (set by
+# `git remote set-head`), then any of main/master that exists as a remote
+# ref (develop is handled separately by the prune caller, not here, so
+# this helper stays scoped to "the canonical default branch").
+_default_branch_for_remote() {
+  local proj=$1 remote=$2 ref branch
+  [ -n "$proj" ] && [ -n "$remote" ] || return 1
+  [ -d "$proj" ] || return 1
+  ref=$(git -C "$proj" symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)
+  if [ -n "$ref" ]; then
+    printf '%s\n' "${ref#$remote/}"
+    return 0
+  fi
+  for branch in main master; do
+    if git -C "$proj" show-ref --verify --quiet "refs/remotes/$remote/$branch"; then
+      printf '%s\n' "$branch"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# _tip_is_ancestor <proj> <tip> <base>: <tip> is reachable from <base>.
+_tip_is_ancestor() {
+  local proj=$1 tip=$2 base=$3
+  [ -n "$tip" ] && [ -n "$base" ] || return 1
+  git -C "$proj" merge-base --is-ancestor "$tip" "$base" 2>/dev/null
+}
+
+# _tip_has_no_unique_files <proj> <tip> <base>: every file in <tip>'s
+# tree is also present in <base>'s tree (zero files unique to <tip>).
+# Equivalent to: tip's content is fully absorbed by base, the squash-merge
+# case where the original branch tip is no longer reachable from base.
+# We use `base..tip` (two-dot, direct tree comparison) because the
+# brief's intent is a tree-subset check, not a merge-base diff: any
+# file tip adds that base lacks would mean base was a proper subset
+# of tip rather than the other way around.
+_tip_has_no_unique_files() {
+  local proj=$1 tip=$2 base=$3 count
+  [ -n "$tip" ] && [ -n "$base" ] || return 1
+  count=$(git -C "$proj" diff --name-only "$base..$tip" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$count" = 0 ]
+}
+
+# _tip_is_merged_into <proj> <tip> <base>: tip merged into base either
+# via ancestry (the merge-commit case) or content overlap (the
+# squash-merge-then-delete-branch case).
+_tip_is_merged_into() {
+  local proj=$1 tip=$2 base=$3
+  _tip_is_ancestor "$proj" "$tip" "$base" && return 0
+  _tip_has_no_unique_files "$proj" "$tip" "$base"
+}
+
+# _meta_held_branches <meta>: echo held branch names (one per line) from
+# meta's `held_branches=<comma-list>` field, or empty when absent. The
+# field is operator-facing: a captain can pin a branch name there so teardown
+# never deletes it even when the merge detection would otherwise clear it.
+_meta_held_branches() {
+  local meta=$1 raw
+  [ -f "$meta" ] || return 0
+  raw=$(grep '^held_branches=' "$meta" 2>/dev/null | cut -d= -f2- || true)
+  [ -n "$raw" ] || return 0
+  printf '%s\n' "$raw" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# _worktree_checked_out_branches <proj>: echo branch names currently
+# checked out in any worktree of <proj> (refs/heads/<name> form, one per
+# line). Detached worktrees contribute no branch line.
+_worktree_checked_out_branches() {
+  local proj=$1 line branch
+  [ -n "$proj" ] && [ -d "$proj" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      'branch refs/heads/'*)
+        branch=${line#'branch refs/heads/'}
+        printf '%s\n' "$branch"
+        ;;
+    esac
+  done <<EOF
+$(git -C "$proj" worktree list --porcelain 2>/dev/null)
+EOF
+}
+
+# _branch_is_protected <branch> <protected_set>: returns 0 when <branch>
+# matches an exact line in the precomputed <protected_set>, 1 otherwise.
+# A blank branch always matches (defensive default: never try to delete
+# an unparseable name).
+_branch_is_protected() {
+  local branch=$1 set=$2
+  [ -n "$branch" ] || return 0
+  case "$set" in
+    *"
+$branch
+"*) return 0 ;;
+  esac
+  return 1
+}
+
+# _task_has_open_captain_decision <meta>: returns 0 when the task has an
+# active captain decision recorded. The decision-hold script
+# (bin/fm-decision-hold.sh) writes `decisions_reviewed=1` and a non-empty
+# `decision_keys=<csv>` field when an unresolved-decision inventory
+# surfaces open holds; an empty `decision_keys=` means reviewed with
+# nothing outstanding. Without a recorded captain-hold, returns 1.
+_task_has_open_captain_decision() {
+  local meta=$1 reviewed keys
+  [ -f "$meta" ] || return 1
+  reviewed=$(grep '^decisions_reviewed=' "$meta" 2>/dev/null | cut -d= -f2- || true)
+  keys=$(grep '^decision_keys=' "$meta" 2>/dev/null | cut -d= -f2- || true)
+  [ "$reviewed" = 1 ] || return 1
+  [ -n "$keys" ] || return 1
+  return 0
+}
+
+# _prune_merged_fork_branches: best-effort cleanup of merged branches on
+# the fork remote at teardown time. Echoes a one-line summary per deleted
+# branch and a final summary line so a captain-facing teardown report can
+# surface the cleanup. Detection covers both the merge-commit ancestry path
+# and the squash-merge-then-delete-branch content path. All failure modes
+# log a one-line note and continue; the function never returns a failure
+# the caller would abort on. Args: <proj> <wt> <meta>.
+_prune_merged_fork_branches() {
+  local proj=$1 wt=$2 meta=$3
+  local login fork upstream default_branch base held_listing checked_out_listing
+  local task_branch protected_set branch tip deleted failed n ref_base
+
+  # Best-effort: every step below tolerates failure so a flaky network or
+  # an unauthenticated gh never blocks the teardown.
+
+  [ -n "$proj" ] && [ -d "$proj" ] || return 0
+  git -C "$proj" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+  login=$(_captain_github_login 2>/dev/null) || {
+    echo "teardown: fork-branch prune skipped: cannot resolve GitHub login" >&2
+    return 0
+  }
+  fork=$(_find_fork_remote "$proj" "$login") || {
+    echo "teardown: fork-branch prune skipped: no fork remote for $login in $proj"
+    return 0
+  }
+  upstream=$(_find_upstream_remote "$proj" "$fork") || {
+    echo "teardown: fork-branch prune skipped: no upstream remote in $proj"
+    return 0
+  }
+  default_branch=$(_default_branch_for_remote "$proj" "$upstream") || {
+    echo "teardown: fork-branch prune skipped: cannot resolve default branch on $upstream"
+    return 0
+  }
+  ref_base="refs/remotes/$upstream/$default_branch"
+
+  # Fetch both remotes so refs/remotes/<remote>/<branch> reflect current
+  # state. Tolerate either side failing.
+  git -C "$proj" fetch --quiet "$upstream" >/dev/null 2>&1 || true
+  git -C "$proj" fetch --quiet "$fork" >/dev/null 2>&1 || true
+
+  # Confirm the upstream default ref materialized; otherwise every tip's
+  # merge test would be ambiguous.
+  if ! git -C "$proj" rev-parse --verify --quiet "$ref_base" >/dev/null 2>&1; then
+    echo "teardown: fork-branch prune skipped: $ref_base unavailable after fetch" >&2
+    return 0
+  fi
+
+  held_listing=$(_meta_held_branches "$meta")
+  checked_out_listing=$(_worktree_checked_out_branches "$proj")
+
+  task_branch=
+  if [ -n "$wt" ] && [ -d "$wt" ]; then
+    task_branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null) || task_branch=
+    case "$task_branch" in
+      HEAD) task_branch= ;;
+    esac
+  fi
+
+  # Protected set: upstream default branch, develop on either remote
+  # (when present), the task's own branch, every held-list entry, every
+  # branch currently checked out in any worktree of <proj>. Assembled via
+  # a temp file (shellcheck disallows mixing `}` with `|` inside the
+  # `$()` arm of a command substitution without a workaround).
+  tmp_protected=$(mktemp) || tmp_protected=
+  if [ -n "$tmp_protected" ]; then
+    {
+      [ -n "$default_branch" ] && printf '%s\n' "$default_branch"
+      [ -n "$task_branch" ] && printf '%s\n' "$task_branch"
+      [ -n "$held_listing" ] && printf '%s\n' "$held_listing"
+      [ -n "$checked_out_listing" ] && printf '%s\n' "$checked_out_listing"
+      if git -C "$proj" show-ref --verify --quiet "refs/remotes/$upstream/develop" 2>/dev/null \
+        || git -C "$proj" show-ref --verify --quiet "refs/remotes/$fork/develop" 2>/dev/null; then
+        printf '%s\n' develop
+      fi
+    } >> "$tmp_protected"
+    raw_protected=$(awk 'NF' "$tmp_protected" | sort -u)
+    # Prefix each entry with a newline so pattern matches always see the
+    # entry on its own line - protects against substring matches like
+    # "main" matching against "maintainer-notes".
+    protected_set=$(printf '\n%s\n' "$raw_protected")
+    rm -f "$tmp_protected"
+  else
+    protected_set=
+  fi
+
+  while IFS= read -r branch; do
+    [ -n "$branch" ] || continue
+    _branch_is_protected "$branch" "$protected_set" && continue
+
+    tip=$(git -C "$proj" rev-parse --verify --quiet "refs/remotes/$fork/$branch^{commit}" 2>/dev/null) || continue
+    [ -n "$tip" ] || continue
+
+    if ! _tip_is_merged_into "$proj" "$tip" "$ref_base"; then
+      continue
+    fi
+
+    if git -C "$proj" push --quiet "$fork" --delete "$branch" >/dev/null 2>&1; then
+      deleted="${deleted:+$deleted, }$branch"
+      echo "teardown: pruned merged branch $branch from $fork"
+    else
+      failed="${failed:+$failed, }$branch"
+    fi
+  done <<EOF
+$(git -C "$proj" for-each-ref --format='%(refname:strip=3)' "refs/remotes/$fork/" 2>/dev/null)
+EOF
+
+  if [ -n "$deleted" ]; then
+    n=$(printf '%s\n' "$deleted" | tr ',' '\n' | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')
+    printf 'teardown: pruned %s merged branches from %s remote: %s\n' "$n" "$fork" "$deleted"
+  else
+    printf 'teardown: pruned 0 merged branches from %s remote\n' "$fork"
+  fi
+  if [ -n "$failed" ]; then
+    printf 'teardown: %s remote delete failed for: %s\n' "$fork" "$failed" >&2
+  fi
+  return 0
 }
 
 meta_value() {
@@ -1080,6 +1430,21 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
       exit 1
     fi
   fi
+fi
+
+# Best-effort: prune merged branches on the fork remote after landed-work
+# verification. Skipped silently for non-ship kinds, --force, non-PR-based
+# modes, and tasks with an open captain-decision hold (so we never delete
+# a branch the captain may still need). Self-contained: every helper is
+# fail-soft and the call below never aborts teardown on failure.
+if [ "$KIND" = ship ] && [ "$FORCE" != "--force" ] \
+   && [ -n "$PROJ" ] && [ -d "$PROJ" ] \
+   && case "$MODE" in
+        no-mistakes|direct-PR|local-only) true ;;
+        *) false ;;
+      esac \
+   && ! _task_has_open_captain_decision "$META"; then
+  _prune_merged_fork_branches "$PROJ" "$WT" "$META" || true
 fi
 
 # Best-effort: drop the local task branch so the shared repo does not accumulate refs.
