@@ -276,7 +276,7 @@ _default_branch_for_remote() {
   [ -d "$proj" ] || return 1
   ref=$(git -C "$proj" symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)
   if [ -n "$ref" ]; then
-    printf '%s\n' "${ref#$remote/}"
+    printf '%s\n' "${ref#"$remote"/}"
     return 0
   fi
   for branch in main master; do
