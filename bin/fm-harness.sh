@@ -133,16 +133,87 @@ harness_marker() {
   # identified, and any rule that must be RELIABLE under grok has to test the hook
   # markers too (see .claude/settings.json Stop entries, docs/turnend-guard.md).
   [ "${GROK_AGENT:-}" = "1" ] && { echo grok; return; }
-  # codex, opencode, kimi, muse, and agy publish no harness-identity marker at all, so
-  # they are never named here and are identified by ancestry alone. That is the
-  # whole reason a foreign marker must not outrank ancestry: with markers winning
-  # unconditionally, any retained CLAUDECODE would silently rename one of them.
-  # muse's only documented child variable is MUSE_CURRENT_SESSION_LOG, a
-  # per-session log PATH rather than an identity, and its export to tool
-  # subprocesses is unverified (verified: muse 0.1.0-R708.1). Do NOT promote it
-  # to a marker without verifying it reaches children AND that it cannot survive
-  # in a multiplexer's stored environment.
-  return 0
+  # codex, opencode, ocv, kimi, muse, and agy publish no harness-identity marker at all, so
+   # they are never named here and are identified by ancestry alone. That is the
+   # whole reason a foreign marker must not outrank ancestry: with markers winning
+   # unconditionally, any retained CLAUDECODE would silently rename one of them.
+   # muse's only documented child variable is MUSE_CURRENT_SESSION_LOG, a
+   # per-session log PATH rather than an identity, and its export to tool
+   # subprocesses is unverified (verified: muse 0.1.0-R708.1). Do NOT promote it
+   # to a marker without verifying it reaches children AND that it cannot survive
+   # in a multiplexer's stored environment, which is the precedence hazard above.
+   # Layer 2: walk the parent chain and match the command name.
+   local pid=$$ comm args argv0
+   for _ in 1 2 3 4 5 6 7 8; do
+     comm=$(ps -o comm= -p "$pid" 2>/dev/null) || break
+     argv0=$(fm_cursor_argv0_for_pid "$pid" "$comm" 2>/dev/null || true)
+     if fm_cursor_process_matches "$comm" '' "$argv0"; then
+       echo cursor
+       return
+     fi
+     if fm_gemini_path_is_gemini "$comm"; then
+       echo gemini
+       return
+     fi
+     case "$(basename -- "$comm")" in
+       # gemini precedes claude here for the same precedence reason as the
+       # marker layer above, so a gemini worker under a claude primary is never
+       # read as claude. This arm covers a natively-named gemini binary only.
+       # It does NOT reach the currently installed CLI, which is a node bundle
+       # (~/.local/bin/gemini -> @google/gemini-cli/bundle/gemini.js): modern
+       # Node on Linux reports `comm` as MainThread rather than node (measured
+       # on Node v24.20.0), so neither this arm nor the node interpreter arm
+       # below matches a live gemini process. GEMINI_CLI above is therefore
+       # load-bearing for gemini rather than a fast path, which is why gemini
+       # is not offered as a primary or secondmate harness. Do NOT add
+       # MainThread to the interpreter arm to close this: that would make the
+       # args of EVERY node process searchable and let an unrelated node
+       # command carrying a harness name in its arguments claim an identity.
+       *claude*) echo claude; return ;;
+       *codex*) echo codex; return ;;
+       ocv|*opencode*) echo opencode; return ;;
+       *grok*) echo grok; return ;;
+       kimi) echo kimi; return ;;
+       rovo) echo rovo; return ;;
+       # muse's installed launcher ~/.local/bin/muse execs ~/.local/bin/muse-bin-<version>
+       # (verified in the published launcher, muse 0.1.0-R708.1), so the live process
+       # name carries the version and CHANGES on every auto-update. Match the stable
+       # prefix rather than any exact name. Deliberately anchored, never *muse*, so
+       # unrelated commands (musescore, amuse) cannot be misread as this harness.
+       muse|muse-bin-*) echo muse; return ;;
+       pi-signed) echo pi; return ;;
+       pi) echo pi; return ;;
+       # omp is a Bun-compiled single binary whose process name is exactly `omp`
+       # (verified, omp 18.1.11: `ps -o comm=` reports omp from both its `!`
+       # bash path and the model's bash tool). Anchored, never *omp*, so ompd,
+       # comp, and similar unrelated commands are not misread as this harness.
+       # It sits above the node*|python* interpreter fallback deliberately: the
+       # optional claude-bridge extension runs a nested executable literally
+       # named `claude` with its own node child, and that fallback's *claude*
+       # args glob would otherwise claim it if that subtree were ever walked.
+       omp) echo omp; return ;;
+       agy) echo agy; return ;;
+       node*|python*)
+         # Bare interpreter: match the harness name in its script path.
+         args=$(ps -o args= -p "$pid" 2>/dev/null)
+         if fm_gemini_args_are_gemini "$args"; then
+           echo gemini
+           return
+         fi
+         case "$args" in
+           *claude*) echo claude; return ;;
+           *codex*) echo codex; return ;;
+           ocv|*opencode*) echo opencode; return ;;
+           *grok*) echo grok; return ;;
+           *" pi "*|*/pi) echo pi; return ;;
+         esac ;;
+     esac
+     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+     if [ -z "$pid" ] || [ "$pid" -le 1 ]; then
+       break
+     fi
+   done
+   echo unknown
 }
 
 # True when an exact `omp` process sits within eight parents of this one. The
