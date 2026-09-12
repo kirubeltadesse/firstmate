@@ -54,7 +54,10 @@ fm_backend_tmux_send_key() {  # <target> <key>
 # submit with Enter, retried (Enter only, never retyped) until the composer
 # clears. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh) verbatim; see
 # that file for the composer-verification contract and echoed verdicts.
-fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
+# The optional <harness> parameter routes the type sequence: OCV (opencode-vim)
+# uses a vim-mode composer and needs the i -> text -> Escape -> Enter sequence
+# instead of the straight text -> Enter sequence used by every other harness.
+fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [harness]
   fm_tmux_submit_core "$@"
 }
 

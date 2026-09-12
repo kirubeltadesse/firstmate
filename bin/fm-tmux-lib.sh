@@ -278,14 +278,27 @@ fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [baseline-idle
   fm_composer_queued_enter_verdict "$state" "$busy_state"
 }
 
-fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle>
-  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 baseline_idle='' baseline_state
+fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle> [harness]
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 harness=${6:-} baseline_idle='' baseline_state
   # The turn-started baseline must predate our own typing: a pane already
   # busy before the text lands can turn "busy" for reasons unrelated to our
   # Enter, so only a clean idle-to-busy transition may confirm a submit.
   baseline_state=$(fm_pane_busy_state "$target")
   [ "$baseline_state" = idle ] && baseline_idle=1
-  tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
+  # OCV (opencode-vim) uses a vim-mode composer: the composer is in normal mode
+  # by default, so a bare `tmux send-keys -l "$text"` types vim commands, not
+  # text. Enter insert mode, type the text, exit insert mode, then submit. This
+  # is the only difference from the opencode path - composer verification,
+  # busy-queued Enter, and turn-started confirmation are all the same.
+  if [ "$harness" = ocv ]; then
+    tmux send-keys -t "$target" i 2>/dev/null || { printf 'send-failed'; return 0; }
+    sleep 0.05
+    tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
+    sleep 0.05
+    tmux send-keys -t "$target" Escape 2>/dev/null || true
+  else
+    tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
+  fi
   sleep "$settle"
   fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$baseline_idle"
 }
