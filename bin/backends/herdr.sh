@@ -3243,11 +3243,23 @@ fm_backend_herdr_queued_enter_busy() {  # <target> <allow-rendered>
   fi
 }
 
-fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
-  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 i=0 verdict baseline confirm_sleep
+fm_backend_herdr_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [harness]
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 harness=${6:-} i=0 verdict baseline confirm_sleep
   local raw_status footer_baseline='' allow_rendered=0 enter_sent=0
   fm_backend_herdr_parse_target "$target" || { printf 'unknown'; return 0; }
-  fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
+  # OCV (opencode-vim) uses a vim-mode composer: the composer is in normal mode
+  # by default, so a bare literal send would type vim commands, not text. Enter
+  # insert mode, type the text, exit insert mode, then submit. Mirrors the
+  # tmux path's OCV sequence in bin/fm-tmux-lib.sh's fm_tmux_submit_core.
+  if [ "$harness" = ocv ]; then
+    fm_backend_herdr_send_key "$target" i || { printf 'send-failed'; return 0; }
+    sleep 0.05
+    fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
+    sleep 0.05
+    fm_backend_herdr_send_key "$target" Escape || true
+  else
+    fm_backend_herdr_send_literal "$target" "$text" || { printf 'send-failed'; return 0; }
+  fi
   sleep "$settle"
   raw_status=$(fm_backend_herdr_agent_status_raw "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")
   baseline=$(fm_backend_herdr_classify_submit_agent_status "$raw_status")
