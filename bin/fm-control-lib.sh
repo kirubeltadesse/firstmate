@@ -155,13 +155,7 @@ fm_control_interrupt_repeat() {  # <harness>
 fm_control_interrupt_clear_key() {  # <harness>
   case "${1-}" in
     muse) printf 'C-u' ;;
-<<<<<<< HEAD
-    claude|codex|opencode|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo|agy) ;;
-||||||| parent of f90eb59c (feat: add ocv (OpenCode Vim) harness support)
-    claude|codex|opencode|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo) ;;
-=======
-    claude|codex|opencode|ocv|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo) ;;
->>>>>>> f90eb59c (feat: add ocv (OpenCode Vim) harness support)
+    claude|codex|opencode|ocv|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo|agy) ;;
     *) return 1 ;;
   esac
 }
@@ -176,13 +170,7 @@ fm_control_interrupt_ack_source() {  # <harness>
     # rovo's TUI prints "Agent cancelled" on Escape, but for parity with
     # claude/cursor this stays 'none': the ack is a rendered string, not a
     # recorded state source, and rovo has no busy wiring to confirm against.
-<<<<<<< HEAD
-    claude|codex|opencode|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo|agy) printf 'none' ;;
-||||||| parent of f90eb59c (feat: add ocv (OpenCode Vim) harness support)
-    claude|codex|opencode|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo) printf 'none' ;;
-=======
-    claude|codex|opencode|ocv|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo) printf 'none' ;;
->>>>>>> f90eb59c (feat: add ocv (OpenCode Vim) harness support)
+    claude|codex|opencode|ocv|pi|pi-signed|omp|grok|kimi|cursor|gemini|rovo|agy) printf 'none' ;;
     *) return 1 ;;
   esac
 }
@@ -190,16 +178,8 @@ fm_control_interrupt_ack_source() {  # <harness>
 # The command that exits the agent from its own composer.
 fm_control_exit_command() {  # <harness>
   case "${1-}" in
-<<<<<<< HEAD
-    claude|opencode|grok|kimi|cursor|muse|rovo) printf '/exit' ;;
-    codex|pi|pi-signed|omp|gemini|agy) printf '/quit' ;;
-||||||| parent of f90eb59c (feat: add ocv (OpenCode Vim) harness support)
-    claude|opencode|grok|kimi|cursor|muse|rovo) printf '/exit' ;;
-    codex|pi|pi-signed|omp|gemini) printf '/quit' ;;
-=======
     claude|opencode|ocv|grok|kimi|cursor|muse|rovo) printf '/exit' ;;
-    codex|pi|pi-signed|omp|gemini) printf '/quit' ;;
->>>>>>> f90eb59c (feat: add ocv (OpenCode Vim) harness support)
+    codex|pi|pi-signed|omp|gemini|agy) printf '/quit' ;;
     *) return 1 ;;
   esac
 }
