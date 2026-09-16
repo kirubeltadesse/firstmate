@@ -395,12 +395,12 @@ EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
 
 if [ "$KIND" = scout ]; then
-if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
-   LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, you may host the Lavish review loop yourself (poll, revise, re-serve, staying alive) instead of handing it back to firstmate.'
- else
-   LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
- fi
- cat > "$BRIEF" <<EOF
+  if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
+    LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, you may host the Lavish review loop yourself (poll, revise, re-serve, staying alive) instead of handing it back to firstmate.'
+  else
+    LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
+  fi
+  cat >"$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
 $TASK_SECTION
@@ -484,7 +484,7 @@ local-only)
   GRAPHIFY_HINT=""
   if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
     GRAPHIFY_HINT="
-3. Check for a knowledge graph in the project root (\`graphify-out/\` directory or \`graph.json\`). When present, prefer querying the knowledge graph over reading raw files:
+3. There is knowledge graph in the project root  directory. Please, prefer querying the knowledge graph over reading raw files:
    \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
    \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
   fi
@@ -509,7 +509,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 
 1. First action: create your branch: \`git checkout -b fm/$ID\`
 2. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
-3. If the repo has graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
+3. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
    Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$SETUP2
 
 # Rules
