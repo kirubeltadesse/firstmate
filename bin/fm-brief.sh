@@ -438,12 +438,12 @@ EOF
 TASK_SECTION=${TASK_SECTION%$'\n'}
 
 if [ "$KIND" = scout ]; then
-if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
-LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
-else
-  LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
-fi
-cat > "$BRIEF" <<EOF
+  if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
+    LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
+  else
+    LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
+  fi
+  cat >"$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
 $TASK_SECTION
@@ -527,7 +527,7 @@ case "$MODE" in
 GRAPHIFY_HINT=""
     if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
       GRAPHIFY_HINT="
-3. Check for a knowledge graph in the project root (\`graphify-out/\` directory or \`graph.json\`). When present, prefer querying the knowledge graph over reading raw files:
+3. The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:
    \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
    \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
     fi
@@ -552,7 +552,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 
 1. First action: create your branch: \`git checkout -b fm/$ID\`
 2. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
-3. If the repo has graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
+3. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
    Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$SETUP2
 
 # Rules
