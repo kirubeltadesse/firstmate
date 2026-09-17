@@ -514,6 +514,7 @@ fi
 # which bin/fm-promote.sh renders too so a promoted scout receives the same contract.
 # The block opens with the fixed "Delivery contract: mode=<mode>" line that
 # bin/fm-spawn.sh checks against its own explicit --mode before launching.
+GRAPHIFY_HINT=""
 case "$MODE" in
   direct-PR)
     SETUP2=""
@@ -524,7 +525,6 @@ case "$MODE" in
   *)  # no-mistakes
     SETUP2="
 2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
-GRAPHIFY_HINT=""
     if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
       GRAPHIFY_HINT="
 3. The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:

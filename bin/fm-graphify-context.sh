@@ -6,8 +6,6 @@
 # Usage: fm-graphify-context.sh <project-dir>
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 PROJECT_DIR=${1:-}
 [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || { echo "error: valid project directory required" >&2; exit 1; }
 
