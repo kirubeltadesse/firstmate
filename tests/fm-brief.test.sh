@@ -223,27 +223,82 @@ test_ship_modes_generate_clean_briefs() {
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }
 
-# Every ship-mode scaffold must carry the graphify step as Setup step 2, and the
-# no-mistakes doctor step must be renumbered to 3 so the numbered list stays
-# coherent in all three delivery modes (direct-PR and local-only end at step 2).
-test_ship_setup_carries_graphify_step() {
-  local home id brief
-  home="$TMP_ROOT/graphify-home"
+# A ship task's delivery mode is firstmate's per-task decision, so a missing or
+# unusable value must stop the scaffold instead of silently defaulting. The
+# no-mistakes-prod-only row is the conditional registry policy: it is never a task
+# mode, and its refusal must say to classify the task's surface first.
+test_ship_mode_is_required_and_closed_set() {
+  local home id out status label flag expect
+  home="$TMP_ROOT/mode-required-home"
+  mkdir -p "$home/data"
+  id=0
+  while IFS='|' read -r label flag expect; do
+    [ -n "$label" ] || continue
+    id=$((id + 1))
+    # shellcheck disable=SC2086  # flag is an intentional word-split arg list (may be empty)
+    out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "brief-required-$id" some-proj $flag 2>&1)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$label: expected a non-zero exit"
+    assert_contains "$out" "$expect" "$label: refusal did not explain the contract"
+    assert_absent "$home/data/brief-required-$id/brief.md" "$label: refused scaffold still wrote a brief"
+  done <<'ROWS'
+missing --mode||ship briefs require --mode
+empty --mode value|--mode|requires a value
+unknown mode value|--mode nope|must be one of no-mistakes, direct-PR, local-only
+conditional policy is not a task mode|--mode no-mistakes-prod-only|classify this task's surface
+ROWS
+  pass "fm-brief.sh: ship --mode is required and closed-set validated"
+}
+
+# The registry is the captain's standing posture, not this task's answer: the
+# scaffold must follow the explicit flag even when the project is registered
+# with a different mode, and must not consult the registry at all.
+test_ship_mode_is_explicit_not_registry() {
+  local home brief
+  home="$TMP_ROOT/explicit-over-registry-home"
   write_registry "$home"
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-explicit-a5 direct-proj --mode no-mistakes >/dev/null 2>&1 ||
-    fail "explicit no-mistakes brief on a direct-PR project should scaffold"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-explicit-a5 direct-proj --mode no-mistakes >/dev/null 2>&1 \
+    || fail "explicit no-mistakes brief on a direct-PR project should scaffold"
   brief="$home/data/brief-explicit-a5/brief.md"
-  grep -qx "Delivery contract: mode=no-mistakes" "$brief" ||
-    fail "registered direct-PR posture overrode the explicit --mode"
+  grep -qx "Delivery contract: mode=no-mistakes" "$brief" \
+    || fail "registered direct-PR posture overrode the explicit --mode"
   assert_grep "Firstmate will then instruct you to run /no-mistakes" "$brief" \
     "explicit no-mistakes brief did not render the pipeline definition of done"
 
   # An unregistered project is not a blocker either, because nothing is looked up.
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-explicit-a6 never-registered --mode local-only >/dev/null 2>&1 ||
-    fail "unregistered project should still scaffold from the explicit mode"
-  grep -qx "Delivery contract: mode=local-only" "$home/data/brief-explicit-a6/brief.md" ||
-    fail "unregistered project did not honour the explicit --mode"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-explicit-a6 never-registered --mode local-only >/dev/null 2>&1 \
+    || fail "unregistered project should still scaffold from the explicit mode"
+  grep -qx "Delivery contract: mode=local-only" "$home/data/brief-explicit-a6/brief.md" \
+    || fail "unregistered project did not honour the explicit --mode"
   pass "fm-brief.sh: the explicit ship mode wins over the registered posture"
+}
+
+# Every ship-mode scaffold must carry the graphify step as Setup step 2, and the
+# no-mistakes doctor step must be numbered 3 so the numbered list stays coherent
+# in all three delivery modes (direct-PR and local-only end at step 2).
+test_ship_setup_carries_graphify_step() {
+  local home id_mode id mode status brief
+  home="$TMP_ROOT/graphify-home"
+  write_registry "$home"
+  for id_mode in "brief-graphify-nm:no-mistakes" "brief-graphify-dp:direct-PR" "brief-graphify-lo:local-only"; do
+    id=${id_mode%%:*}
+    mode=${id_mode##*:}
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode "$mode" >/dev/null 2>&1
+    status=$?
+    expect_code 0 "$status" "fm-brief.sh $id --mode $mode should exit 0"
+    brief="$home/data/$id/brief.md"
+    assert_grep "graphify extract . --code-only" "$brief" "$id: brief missing the graphify extraction step"
+    assert_grep "Prefer graphify queries" "$brief" "$id: brief missing the graphify query preference"
+    assert_grep "2. There should be graphify configured" "$brief" "$id: the graphify step must be Setup step 2"
+    assert_no_grep "3. There should be graphify configured" "$brief" "$id: the graphify step must not be numbered 3"
+    if [ "$mode" = "no-mistakes" ]; then
+      assert_grep "3. Run \`no-mistakes doctor\`" "$brief" "$id: the no-mistakes doctor step must be numbered 3 so the Setup list stays coherent"
+      assert_no_grep "2. Run \`no-mistakes doctor\`" "$brief" "$id: the no-mistakes doctor step must not be renumbered under 3"
+    else
+      assert_no_grep "no-mistakes doctor" "$brief" "$id: the no-mistakes doctor step must not appear"
+    fi
+  done
+  pass "fm-brief.sh: every ship-mode scaffold carries a coherent graphify Setup step"
 }
 
 # yolo is firstmate's merge authority and never reaches the worker, and a scout

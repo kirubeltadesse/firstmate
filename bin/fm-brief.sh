@@ -515,6 +515,12 @@ fi
 # The block opens with the fixed "Delivery contract: mode=<mode>" line that
 # bin/fm-spawn.sh checks against its own explicit --mode before launching.
 GRAPHIFY_HINT=""
+if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
+  GRAPHIFY_HINT="
+   The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:
+   \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
+   \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
+fi
 case "$MODE" in
   direct-PR)
     SETUP2=""
@@ -524,13 +530,7 @@ case "$MODE" in
     ;;
   *)  # no-mistakes
     SETUP2="
-2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
-    if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
-      GRAPHIFY_HINT="
-3. The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:
-   \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
-   \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
-    fi
+3. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
     ;;
 esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID") || exit 1
@@ -551,9 +551,8 @@ The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
 1. First action: create your branch: \`git checkout -b fm/$ID\`
-2. Use gh-axi for GitHub operations and chrome-devtools-axi for browser operations.$GRAPHIFY_HINT
-3. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
-   Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$SETUP2
+2. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
+   Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$GRAPHIFY_HINT$SETUP2
 
 # Rules
 $RULE1
