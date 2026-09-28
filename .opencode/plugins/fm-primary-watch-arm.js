@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { encodeFirstmateOperationalInput } from "./lib/fm-operational-input.js";
 
@@ -90,11 +90,44 @@ function effectivePaths(root) {
   return { root: fmRoot, home: fmHome, state, config };
 }
 
+// Mirror fm_root_is_secondmate_home from bin/fm-primary-scope-lib.sh:
+// return true when the path carries a genuine non-symlink secondmate-home marker
+// whose first line is a non-empty alphanumeric id.
+function isSecondmateHome(dir) {
+  const marker = `${dir}/.fm-secondmate-home`;
+  try {
+    const stat = lstatSync(marker);
+    if (stat.isSymbolicLink()) return false;
+    if (!stat.isFile()) return false;
+  } catch {
+    return false;
+  }
+  let id;
+  try {
+    id = readFileSync(marker, "utf8").split(/\r?\n/)[0] ?? "";
+  } catch {
+    return false;
+  }
+  id = id.replace(/\s/g, "");
+  if (!id) return false;
+  return /^[A-Za-z0-9._-]+$/.test(id);
+}
+
+// Mirror fm_primary_scope_matches from bin/fm-primary-scope-lib.sh:
+// A valid secondmate home is a primary scope; the git worktree check is skipped
+// for it.  Otherwise only a plain checkout (git-dir == git-common-dir) qualifies.
 async function isPrimaryRoot(root, home) {
   if (!root) return false;
   if (!existsSync(`${root}/AGENTS.md`) || !existsSync(`${root}/bin`)) return false;
-  if (existsSync(`${root}/.fm-secondmate-home`)) return false;
-  if (home && home !== root && existsSync(`${home}/.fm-secondmate-home`)) return false;
+  // Determine which path to test for a secondmate-home marker.
+  // fm_primary_scope_matches tests $1 (root) first via fm_root_is_secondmate_home,
+  // and the FM_HOME override path is already folded into root/home by effectivePaths.
+  const testDir = home && home !== root ? home : root;
+  if (isSecondmateHome(testDir) || isSecondmateHome(root)) {
+    // Valid secondmate home: accepted as primary scope without a worktree check.
+    return true;
+  }
+  // Plain checkout: git-dir must equal git-common-dir (not a worktree).
   const gitDir = await runProcess("git", ["-C", root, "rev-parse", "--git-dir"]);
   const commonDir = await runProcess("git", ["-C", root, "rev-parse", "--git-common-dir"]);
   if (gitDir.code !== 0 || commonDir.code !== 0) return false;
