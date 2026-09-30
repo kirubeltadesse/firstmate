@@ -208,36 +208,33 @@ for a in "$@"; do
       ;;
     esac
     case "$want_value" in
-    mode)
-      MODE=$a
-      MODE_SET=1
-      ;;
-    *)
-      echo "error: internal parser state for --$want_value" >&2
-      exit 1
-      ;;
+      mode) MODE=$a; MODE_SET=1 ;;
+      branch-prefix) BRANCH_PREFIX=$a; BRANCH_PREFIX_SET=1 ;;
+      forge) FORGE=$a; FORGE_SET=1 ;;
+      shape) SHAPE=$a; SHAPE_SET=1 ;;
+      *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
     continue
   fi
   case "$a" in
-  --scout) KIND=scout ;;
-  --secondmate) KIND=secondmate ;;
-  --herdr-lab) HERDR_LAB=1 ;;
-  --no-projects) NO_PROJECTS=1 ;;
-  --mode) want_value=mode ;;
-  --mode=*)
-    MODE=${a#--mode=}
-    MODE_SET=1
-    ;;
-  # yolo never reaches the worker: it is firstmate's merge authority, not a
-  # brief input. Refuse it loudly so it is never silently dropped here and then
-  # believed to have been recorded.
-  --yolo | --yolo=*)
-    echo "error: --yolo is not a brief input; pass it to bin/fm-spawn.sh, which records the task's merge posture" >&2
-    exit 1
-    ;;
-  *) POS+=("$a") ;;
+    --scout) KIND=scout ;;
+    --secondmate) KIND=secondmate ;;
+    --herdr-lab) HERDR_LAB=1 ;;
+    --no-projects) NO_PROJECTS=1 ;;
+    --mode) want_value=mode ;;
+    --mode=*) MODE=${a#--mode=}; MODE_SET=1 ;;
+    --branch-prefix) want_value="branch-prefix" ;;
+    --branch-prefix=*) BRANCH_PREFIX=${a#--branch-prefix=}; BRANCH_PREFIX_SET=1 ;;
+    --forge) want_value=forge ;;
+    --forge=*) FORGE=${a#--forge=}; FORGE_SET=1 ;;
+    --shape) want_value=shape ;;
+    --shape=*) SHAPE=${a#--shape=}; SHAPE_SET=1 ;;
+    # yolo never reaches the worker: it is firstmate's merge authority, not a
+    # brief input. Refuse it loudly so it is never silently dropped here and then
+    # believed to have been recorded.
+    --yolo|--yolo=*) echo "error: --yolo is not a brief input; pass it to bin/fm-spawn.sh, which records the task's merge posture" >&2; exit 1 ;;
+    *) POS+=("$a") ;;
   esac
 done
 [ -z "$want_value" ] || {
@@ -275,14 +272,8 @@ if [ "$KIND" != ship ] && [ "$BRANCH_PREFIX_SET" -eq 1 ]; then
   exit 1
 fi
 case "$BRANCH_PREFIX" in
-*' '*)
-  echo "error: --branch-prefix must not contain a space (got '$BRANCH_PREFIX')" >&2
-  exit 1
-  ;;
--*)
-  echo "error: --branch-prefix must not start with '-' (got '$BRANCH_PREFIX')" >&2
-  exit 1
-  ;;
+  *' '*) echo "error: --branch-prefix must not contain a space (got '$BRANCH_PREFIX')" >&2; exit 1 ;;
+  -*) echo "error: --branch-prefix must not start with '-' (got '$BRANCH_PREFIX')" >&2; exit 1 ;;
 esac
 # The forge is validated against the same closed set the renderers enforce, so a
 # typo or an impossible mode/forge pair stops here rather than reaching a worker.
@@ -291,15 +282,11 @@ if [ "$KIND" = ship ]; then
   if [ "$FORGE" = gerrit ]; then
     [ "$SHAPE_SET" -eq 1 ] || SHAPE=squash
     case "$SHAPE" in
-    squash) ;;
-    stack)
-      echo "error: --shape stack is refused: a stack is several changes, and it must be watched by its membership pinned when its watch is armed, which this fleet does not yet do - the merge watch follows exactly one change, so a stack's wake could report one change as the whole stack; publish --shape squash" >&2
-      exit 1
-      ;;
-    *)
-      echo "error: --shape must be squash (got '$SHAPE')" >&2
-      exit 1
-      ;;
+      squash) ;;
+      stack)
+        echo "error: --shape stack is refused: a stack is several changes, and it must be watched by its membership pinned when its watch is armed, which this fleet does not yet do - the merge watch follows exactly one change, so a stack's wake could report one change as the whole stack; publish --shape squash" >&2
+        exit 1 ;;
+      *) echo "error: --shape must be squash (got '$SHAPE')" >&2; exit 1 ;;
     esac
   elif [ "$SHAPE_SET" -eq 1 ]; then
     echo "error: --shape applies only with --forge gerrit, where the worker publishes the change itself" >&2
@@ -349,7 +336,7 @@ append_brief_include() {
   printf '\n%s\n%s\n%s\n' \
     '# Home brief additions' \
     "These are this home's standing additions; every other section of this brief takes precedence over anything here that conflicts." \
-    "$BRIEF_INCLUDE_BODY" >>"$BRIEF"
+    "$BRIEF_INCLUDE_BODY" >> "$BRIEF"
 }
 
 BRIEF="$DATA/$ID/brief.md"
@@ -498,27 +485,31 @@ fi
 REPO=${POS[1]}
 
 if [ "$HERDR_LAB" -eq 1 ]; then
-  HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
-  # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
-  HERDR_SECTION=$(printf '%s\n' \
-    '# Herdr isolation - HARD SAFETY CONTRACT' \
-    'This brief was explicitly scaffolded with `--herdr-lab` because the task will drive Herdr lifecycle behavior.' \
-    'On Herdr 0.7.3 the API socket is not relocatable by `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, or `HOME`.' \
-    'A named non-`default` session plus a trailing `--session <name>` on every call is the only viable local isolation.' \
-    '' \
-    '1. Set `HERDR_LAB_HELPER='"$HERDR_LAB_HELPER"'` and generate the session name with `HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name '"$ID"')`.' \
-    '   Install `trap '\''"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"'\'' EXIT` before provisioning, then provision only with `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"`.' \
-    '2. Run every task-specific non-lifecycle Herdr command through `"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" <arguments...>`.' \
-    '   The helper appends the required trailing `--session "$HERDR_LAB_SESSION"`; `HERDR_SESSION` alone is never accepted as isolation.' \
-    '3. Teardown only through `"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"`.' \
-    '   It re-checks refuse-default immediately before stop and again immediately before delete, and fails closed on ambiguity.' \
-    '4. If an experiment requires a deliberate mid-run session stop, use only `"$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION"`; it performs the same immediate refuse-default check.' \
-    '5. Forbidden commands: direct `herdr server stop`, every other server-global operation such as `herdr server live-handoff` or reload/update operations, direct `herdr session stop`, direct `herdr session delete`, and any Herdr call scoped only by ambient or inline `HERDR_SESSION`.' \
-    '6. The helper records the live default session before provisioning and verifies the identical fleet state after teardown.' \
-    '   A missing, stopped, or changed default session is a hard tripwire failure, never a cleanup warning to ignore.' \
-    '' \
-    'Never bypass the helper, even for a read-only lifecycle probe or cleanup after failure.' \
-    'The captain fleet uses the running `default` session.')
+HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
+# shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
+HERDR_SECTION=$(printf '%s\n' \
+'# Herdr isolation - HARD SAFETY CONTRACT' \
+'This brief was explicitly scaffolded with `--herdr-lab` because the task will drive Herdr lifecycle behavior.' \
+'On Herdr 0.7.3 the API socket is not relocatable by `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, or `HOME`.' \
+'A named non-`default` session plus an explicit `--session <name>` Herdr option on every call is the only viable local isolation.' \
+'' \
+'For tmux-based lab primaries, `bin/fm-lab-home.sh` owns the short private socket directory; do not place `TMUX_TMPDIR` under the lab home or worktree.' \
+'Use `LAB_HOME_HELPER='"$(shell_quote "$FM_ROOT/bin/fm-lab-home.sh")"'`, then `LAB_TMUX_DIR=$("$LAB_HOME_HELPER" tmux-dir "$FM_HOME")` and launch tmux with `TMUX_TMPDIR="$LAB_TMUX_DIR"`.' \
+'Your single EXIT cleanup trap must kill only the server addressed through that `TMUX_TMPDIR`, call `"$LAB_HOME_HELPER" teardown "$FM_HOME"`, and call the Herdr teardown below; do not install a second trap that replaces either cleanup.' \
+'' \
+'1. Set `HERDR_LAB_HELPER='"$HERDR_LAB_HELPER"'` and generate the session name with `HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name '"$ID"')`.' \
+'   Install the combined EXIT cleanup before provisioning, then provision only with `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"`.' \
+'2. Run every task-specific non-lifecycle Herdr command through `"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" <arguments...>`.' \
+'   The helper supplies the required `--session "$HERDR_LAB_SESSION"` as a Herdr option, before any `--` delimiter; `HERDR_SESSION` alone is never accepted as isolation.' \
+'3. Teardown only through `"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"`.' \
+'   It re-checks refuse-default immediately before stop and again immediately before delete, and fails closed on ambiguity.' \
+'4. If an experiment requires a deliberate mid-run session stop, use only `"$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION"`; it performs the same immediate refuse-default check.' \
+'5. Forbidden commands: direct `herdr server stop`, every other server-global operation such as `herdr server live-handoff` or reload/update operations, direct `herdr session stop`, direct `herdr session delete`, and any Herdr call scoped only by ambient or inline `HERDR_SESSION`.' \
+'6. The helper records the live default session before provisioning and verifies the identical fleet state after teardown.' \
+'   A missing, stopped, or changed default session is a hard tripwire failure, never a cleanup warning to ignore.' \
+'' \
+'Never bypass the helper, even for a read-only lifecycle probe or cleanup after failure.' \
+'The captain fleet uses the running `default` session.')
 else
   IFS= read -r -d '' HERDR_SECTION <<'EOF' || true
 # Herdr lifecycle declaration - NOT ENABLED
@@ -620,16 +611,17 @@ Before reporting done, read and follow \`$FM_ROOT/.agents/skills/captain-hold-li
 When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\` to the status file and stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
-  append_brief_include
-  echo "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
-  exit 0
+append_brief_include
+echo "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
+exit 0
 fi
 
 # Ship task: shape Setup / Rule 1 by this task's explicit delivery mode, validated
 # above, and render the Definition of done from its single owner, bin/fm-dod-lib.sh,
 # which bin/fm-promote.sh renders too so a promoted scout receives the same contract.
 # The block opens with the fixed "Delivery contract: mode=<mode>" line that
-# bin/fm-spawn.sh checks against its own explicit --mode before launching.
+# bin/fm-spawn.sh checks against its own explicit --mode and the project's
+# registered forge before launching.
 GRAPHIFY_HINT=""
 if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
   GRAPHIFY_HINT="
@@ -637,19 +629,17 @@ if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY 
    \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
    \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
 fi
-# bin/fm-spawn.sh checks against its own explicit --mode and the project's
-# registered forge before launching.
 case "$MODE" in
-direct-PR)
-  SETUP2=""
-  ;;
-local-only)
-  SETUP2=""
-  ;;
-*) # no-mistakes
-  SETUP2="
+  direct-PR)
+    SETUP2=""
+    ;;
+  local-only)
+    SETUP2=""
+    ;;
+  *)  # no-mistakes
+    SETUP2="
 3. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
-  ;;
+    ;;
 esac
 RULE1=$(fm_ship_rule_one "$MODE" "$ID" "$BRANCH" "$FORGE") || exit 1
 DOD=$(fm_dod_block "$MODE" "$ID" "$BRANCH" "$FORGE") || exit 1
@@ -668,10 +658,9 @@ You are in a disposable git worktree of $REPO, at a detached HEAD on a clean def
 The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse --git-common-dir\` can help inspect the repo, but they do not prove you are outside the primary checkout.
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
-1. First action: create your branch: \`git checkout -b fm/$ID\`
+1. First action: create your branch: \`git checkout -b $BRANCH_Q --\`
 2. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
    Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$GRAPHIFY_HINT$SETUP2
-1. First action: create your branch: \`git checkout -b $BRANCH_Q --\`$SETUP2
 
 # Rules
 $RULE1
@@ -697,11 +686,9 @@ $CREWMATE_PAUSE_INSTRUCTIONS
 $ASK_USER_BLOCK
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
-7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
-   every lane/home, so restarting it kills other lanes' in-flight pipeline runs; only firstmate
-   manages the daemon.
-8. Never commit, push, or include \`context/*.md\` files in any branch or PR. These are local-only agent references and must stay outside version control.
 $SHARED_INFRA_RULE
+
+8. Never commit, push, or include \`context/*.md\` files in any branch or PR. These are local-only agent references and must stay outside version control.
 
 $INBOX_SECTION
 
