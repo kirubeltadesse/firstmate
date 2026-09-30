@@ -3603,6 +3603,7 @@ test_merge_entrypoints_refuse_a_reused_task_incarnation() {
   PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_CONFIG_OVERRIDE="$home/config" FM_TEST_REUSE_TEARDOWN=1 \
+    FM_SLEEP_FIFO="$home/no-such-dir/fifo" \
     FM_TEST_REUSE_TEARDOWN_ONCE="$home/reuse-teardown-once" \
     FM_TEST_REUSE_TEARDOWN_READY="$teardown_ready" \
     FM_TEST_REUSE_TEARDOWN_RELEASE="$teardown_release" \
@@ -3617,6 +3618,7 @@ test_merge_entrypoints_refuse_a_reused_task_incarnation() {
   fi
 
   FM_TEST_REUSE_MERGE=1 FM_TEST_REUSE_MERGE_ONCE="$home/reuse-merge-once" \
+    FM_SLEEP_FIFO="$home/no-such-dir/fifo" \
     FM_TEST_REUSE_MERGE_READY="$merge_ready" FM_TEST_REUSE_MERGE_RELEASE="$merge_release" \
     FM_TEST_REAL_PERL="$real_perl" FM_TEST_REAL_SLEEP="$real_sleep" \
     run_pr_merge "$home" "$id" "$pr" > "$home/reuse-merge.out" \
@@ -3693,6 +3695,7 @@ test_merge_entrypoints_refuse_a_reused_task_incarnation() {
   PATH="$local_home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$local_home" \
     FM_STATE_OVERRIDE="$local_home/state" FM_DATA_OVERRIDE="$local_home/data" \
     FM_CONFIG_OVERRIDE="$local_home/config" FM_TEST_REUSE_TEARDOWN=1 \
+    FM_SLEEP_FIFO="$local_home/no-such-dir/fifo" \
     FM_TEST_REUSE_TEARDOWN_ONCE="$local_home/reuse-teardown-once" \
     FM_TEST_REUSE_TEARDOWN_READY="$local_teardown_ready" \
     FM_TEST_REUSE_TEARDOWN_RELEASE="$local_teardown_release" \
@@ -3708,6 +3711,7 @@ test_merge_entrypoints_refuse_a_reused_task_incarnation() {
 
   PATH="$local_home/fakebin:$PATH" FM_TEST_REUSE_MERGE=1 \
     FM_TEST_REUSE_MERGE_ONCE="$local_home/reuse-merge-once" \
+    FM_SLEEP_FIFO="$local_home/no-such-dir/fifo" \
     FM_TEST_REUSE_MERGE_READY="$local_merge_ready" \
     FM_TEST_REUSE_MERGE_RELEASE="$local_merge_release" \
     FM_TEST_REAL_PERL="$real_perl" FM_TEST_REAL_SLEEP="$real_sleep" \
