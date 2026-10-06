@@ -220,9 +220,12 @@ fm_exec_timed() {  # <seconds> <grace-seconds> <command...>
     echo "fm_exec_timed: usage: fm_exec_timed <positive-seconds> <positive-grace-seconds> <command> [args...]" >&2
     exit 125
   fi
-  owner=${FM_EXEC_TIMED_OWNER_PID:-$$}
-  [ "$owner" != "$BASHPID" ] || owner=$PPID
-  unset FM_EXEC_TIMED_OWNER_PID
+owner=${FM_EXEC_TIMED_OWNER_PID:-$$}
+   # BASHPID does not exist in bash 3.2 (still the system bash on macOS), so read
+   # it through a fallback instead of referencing it bare under `set -u`.
+   fm_cur_pid=${BASHPID:-$(exec sh -c 'printf "%s\n" "$PPID"')}
+   [ "$owner" != "$fm_cur_pid" ] || owner=$PPID
+   unset FM_EXEC_TIMED_OWNER_PID
   if command -v perl >/dev/null 2>&1; then
     exec perl -MPOSIX=WNOHANG,setpgid -MTime::HiRes=time -e '
       my ($bound, $grace, $owner) = (shift, shift, shift);

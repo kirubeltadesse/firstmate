@@ -586,6 +586,23 @@ IFS= read -r -d '' SHARED_INFRA_RULE <<'EOF' || true
 EOF
 SHARED_INFRA_RULE=${SHARED_INFRA_RULE%$'\n'}
 
+# Knowledge-graph hint: only emitted when the project clone actually carries a
+# graph. The project name is a basename, while bin/fm-graphify-context.sh needs a
+# real directory, so resolve the clone the way bin/fm-spawn.sh does. Presence is
+# detected in the clone rather than the task worktree because a linked worktree
+# never carries a graph of its own: graphify's post-commit and post-checkout hooks
+# skip linked worktrees on purpose, so they cannot race the clone's canonical graph.
+PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+PROJECT_CLONE="$PROJECTS/$REPO"
+GRAPHIFY_HINT=""
+if [ -x "$SCRIPT_DIR/fm-graphify-context.sh" ] &&
+   "$SCRIPT_DIR/fm-graphify-context.sh" "$PROJECT_CLONE" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
+  GRAPHIFY_HINT="
+   The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:
+   \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
+   \`graphify explain \"<concept>\"\` for definitions and connections between concepts."
+fi
+
 if [ -n "$BASE_BRANCH" ]; then
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean copy of its base branch.
 Base branch: $BASE_BRANCH"
@@ -684,7 +701,9 @@ $SETUP_BASE
 The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse --git-common-dir\` can help inspect the repo, but they do not prove you are outside the primary checkout.
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
-1. First action: create your branch: \`git checkout -b $BRANCH_Q --\`$SETUP2
+1. First action: create your branch: \`git checkout -b $BRANCH_Q --\`
+2. Run \`graphify update .\` once before exploring the codebase. It is a code-only AST rebuild: no LLM, no API key, no cost, and it builds the graph inside this worktree so it reflects the branch you are on.
+   Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$GRAPHIFY_HINT$SETUP2
 
 # Rules
 $RULE1
