@@ -484,6 +484,15 @@ fi
 
 REPO=${POS[1]}
 
+# The project name is only a basename, while bin/fm-graphify-context.sh requires a
+# real directory, so resolve the clone the way bin/fm-spawn.sh does
+# (PROJ_NAME is basename of that same clone). Presence is detected in the clone
+# rather than the task worktree because a linked worktree never carries a graph
+# of its own: graphify's post-commit and post-checkout hooks skip linked
+# worktrees on purpose, so they cannot race the clone's canonical graph.
+PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+PROJECT_CLONE="$PROJECTS/$REPO"
+
 if [ "$HERDR_LAB" -eq 1 ]; then
 HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
@@ -623,7 +632,7 @@ fi
 # bin/fm-spawn.sh checks against its own explicit --mode and the project's
 # registered forge before launching.
 GRAPHIFY_HINT=""
-if "$SCRIPT_DIR/fm-graphify-context.sh" "$REPO" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
+if "$SCRIPT_DIR/fm-graphify-context.sh" "$PROJECT_CLONE" 2>/dev/null | grep -q 'GRAPHIFY AVAILABLE'; then
   GRAPHIFY_HINT="
    The project root has a knowledge graph (\`graphify-out/\` directory or \`graph.json\`). Prefer querying the knowledge graph over reading raw files:
    \`graphify query \"<question>\"\` for architecture, relationships, and project structure.
@@ -659,7 +668,7 @@ The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse
 If the top-level path is the primary checkout or not the worktree you were launched in, STOP - do not branch or commit here - append \`blocked [at=<epoch>]: launched in primary checkout, not an isolated worktree\` to the status file and stop.
 
 1. First action: create your branch: \`git checkout -b $BRANCH_Q --\`
-2. There should be graphify configured (check for \`docs/graphify.md\`), run \`graphify extract . --code-only\` once before exploring the codebase.
+2. Run \`graphify update .\` once before exploring the codebase. It is a code-only AST rebuild: no LLM, no API key, no cost, and it builds the graph inside this worktree so it reflects the branch you are on.
    Prefer graphify queries (\`graphify god-nodes\`, \`graphify query\`, \`graphify path\`, \`graphify affected\`) over grep for codebase exploration.$GRAPHIFY_HINT$SETUP2
 
 # Rules

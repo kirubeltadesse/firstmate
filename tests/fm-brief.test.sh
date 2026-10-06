@@ -287,10 +287,12 @@ test_ship_setup_carries_graphify_step() {
     status=$?
     expect_code 0 "$status" "fm-brief.sh $id --mode $mode should exit 0"
     brief="$home/data/$id/brief.md"
-    assert_grep "graphify extract . --code-only" "$brief" "$id: brief missing the graphify extraction step"
+    assert_grep "graphify update ." "$brief" "$id: brief missing the graphify build step"
     assert_grep "Prefer graphify queries" "$brief" "$id: brief missing the graphify query preference"
-    assert_grep "2. There should be graphify configured" "$brief" "$id: the graphify step must be Setup step 2"
-    assert_no_grep "3. There should be graphify configured" "$brief" "$id: the graphify step must not be numbered 3"
+    assert_no_grep "graphify extract" "$brief" "$id: brief must not instruct the superseded extract command"
+    assert_no_grep "docs/graphify.md" "$brief" "$id: brief must not point at a nonexistent graphify doc"
+    assert_grep "2. Run \`graphify update .\`" "$brief" "$id: the graphify step must be Setup step 2"
+    assert_no_grep "3. Run \`graphify update .\`" "$brief" "$id: the graphify step must not be numbered 3"
     if [ "$mode" = "no-mistakes" ]; then
       assert_grep "3. Run \`no-mistakes doctor\`" "$brief" "$id: the no-mistakes doctor step must be numbered 3 so the Setup list stays coherent"
       assert_no_grep "2. Run \`no-mistakes doctor\`" "$brief" "$id: the no-mistakes doctor step must not be renumbered under 3"
@@ -299,6 +301,33 @@ test_ship_setup_carries_graphify_step() {
     fi
   done
   pass "fm-brief.sh: every ship-mode scaffold carries a coherent graphify Setup step"
+}
+
+# The graphify guidance block is derived from the project clone, not the bare
+# project name. fm-graphify-context.sh requires a real directory and fails closed,
+# so passing a bare name silently suppressed the block for every ship brief.
+# Prove the block now follows the clone's actual graph state, in both directions.
+test_graphify_hint_follows_project_clone() {
+  local home brief status
+  home="$TMP_ROOT/graphify-hint-home"
+  write_registry "$home"
+  mkdir -p "$home/projects/graphed/graphify-out"
+  mkdir -p "$home/projects/plain"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-hint-graphed graphed --mode direct-PR >/dev/null 2>&1
+  status=$?
+  expect_code 0 "$status" "a ship brief for a project whose clone has a graph should exit 0"
+  brief="$home/data/brief-hint-graphed/brief.md"
+  assert_grep "Prefer querying the knowledge graph" "$brief" "a clone with graph artifacts must earn the graphify guidance block"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-hint-plain plain --mode direct-PR >/dev/null 2>&1
+  status=$?
+  expect_code 0 "$status" "a ship brief for a project whose clone has no graph should still exit 0"
+  brief="$home/data/brief-hint-plain/brief.md"
+  assert_no_grep "Prefer querying the knowledge graph" "$brief" "a clone without graph artifacts must not be told a knowledge graph exists"
+  assert_grep "Prefer graphify queries" "$brief" "the unconditional graphify step must survive even with no graph present"
+
+  pass "fm-brief.sh: the graphify guidance block follows the project clone's graph state"
 }
 
 # yolo is firstmate's merge authority and never reaches the worker, and a scout
@@ -1370,6 +1399,7 @@ test_ship_mode_is_required_and_closed_set
 test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply
 test_ship_setup_carries_graphify_step
+test_graphify_hint_follows_project_clone
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
 test_no_mistakes_dod_green_detection
